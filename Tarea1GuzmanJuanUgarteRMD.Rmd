@@ -1,0 +1,147 @@
+---
+title: "Análisis PIB vs Precio Big Mac"
+author: "José Guzmán, Bastián Juan y Guillermo Ugarte"
+date: "24-04-2022"
+output:
+  html_document: default
+  pdf_document: default
+lang: es-ES
+---
+
+# Introducción
+
+### McDonald's es una cadena de comida rápida súmamente globalizada encontrándose en la mayoría de los países a lo largo del mundo. Su producto más icónico es la Big Mac, una hamburguesa que se ha vuelto popular en la cultura mundial, existiendo referencias de esta como si se tratase de un indicador en el mercado donde se encuentra. 
+
+### En el siguiente trabajo analizaremos si es que el precio de la Big Mac en dólares tiene o no relación alguna con el PIB del país en el que se encuentre, de manera que pueda expicar si el precio es acorde o no al valor del PIB respecto a los demás países, según la hipótesis de que el precio de la Big Mac es directamente proporcional al valor del PIB (ambos en dólares). 
+
+## Instalación de librerías y paquetes
+Las librerías que se utilizarán para poder leer, cargar, mostrar e interpretar los datos son las principalmente vistas en clases, tales como: rnaturalearth (y sus variantes), sf, mapview, gstat, sp y otras más. 
+
+```{r message=FALSE}
+library(tinytex)
+library(rnaturalearthhires)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(mapview)
+library(dplyr)
+library(sf)
+library(gstat)
+library(sp)
+```
+
+Luego procedemos a cargar nuestra data, realizar una necesaria limpieza de datos e instalar una librería más para vincular los datos. 
+
+```{r message=FALSE}
+datos= read.csv(file.choose(), sep = ",", header = TRUE, encoding = "UTF-8" ,fill = TRUE)
+
+datos <- select(datos, -currency_code)
+datos <- select(datos, -local_price, -EUR, -GBP, -JPY, -CNY)
+
+library(countrycode)
+datos$continent <- countrycode::countrycode(sourcevar = datos[, "name"],
+                                            origin = "country.name",
+                                            destination = "continent")
+```
+
+Creamos la sección "pp120" utilizando la librería "rnaturalearth", con la categoría cultural.  
+
+```{r}
+pp120 <- ne_countries(scale = 'large' ,returnclass = "sf")
+```
+
+
+Ahora, creamos un nuevo dataframe con los datos combinados mediante la asociaciÃ³n con la columna iso_a3 y sov_a3, que corresponden a la abreviatura del nombre de los países. 
+
+```{r warning=FALSE}
+DatosCombinados <- merge(datos, pp120, by.x="iso_a3", by.y="sov_a3")
+```
+
+Luego filtramos la nueva base de datos obteniendo nuestras columnas que nos permitirán estudiar nuestra hipótesis. Ellas son la fecha del valor de la Big Mac y del PIB, el valor de intercambio del dólar a esa fecha, el precio de la Big Mac en dólares a la fecha, el PIB del país y el ingreso. 
+
+```{r warning=FALSE}
+DataComb <- select(DatosCombinados, iso_a3, date, name.x, dollar_ex, dollar_price, USD, continent.x,  gdp_md_est, income_grp, geometry)
+
+```
+
+La medición para nuestra hipótesis será reducida sólamente al contiente americano. Si bien la base de datos no tiene todos los países, creemos que es una buena medición para confirmar o rechazar nuestra hipótesis. 
+
+```{r warning=FALSE}
+DataComb <- DataComb[DataComb$continent.x=="Americas",]
+
+
+Mapa <- st_as_sf(DataComb)
+```
+
+Una vez que tenemos los datos en formato sf, podemos comenzar con la correlación espacial de la data y los gráficos.
+
+```{r warning=FALSE}
+pacman::p_load(tmap, sf, tidyverse, mapview, RColorBrewer, viridis,
+               leafpop, leaflet, leaflet.extras, mapdeck, plotly, ggmap,
+               ggiraph, widgetframe)
+```
+
+
+Creamos una paleta que nos va a servir para los colores.
+
+```{r warning=FALSE}
+pal <- magma(n = length(unique(Mapa$name.x)), direction = -1)
+```
+
+Creamos dos mapas interactivos para comparar el PIB con el precio de la Big Mac en 10 años (2009-2019). 
+
+```{r warning=FALSE}
+Mapa2019 <- mapview(Mapa[Mapa$date=="2019-01-01",], zcol = "dollar_price")
+Mapa2009 <- mapview(Mapa[Mapa$date=="2009-07-01",], zcol = "dollar_price")
+```
+
+
+Ahora hacemos un mapa interactivo que muestre los valores de la big mac en el año 2009 vs 2019. En este mapa tenemos 3 acciones: Si se sitúa el cursor sobre un país, entrega el precio de la Big Mac en dólares. Si se hace clic en el páis, muestra todas las variables que analizamos. Y por último si se mueve la barra situada inicialmente al medio del mapa (de forma vertical), podemos ver el cambio entre el año 2009 y 2019. 
+
+```{r warning=FALSE}
+library(leaflet.extras2)
+Mapa2009|Mapa2019
+
+mylabel <- glue::glue("{Mapa$name.x} {Mapa$dollar_price}")
+```
+De esta manera podemos analizar gráficamente que en América existen distintos precios del producto, además de los distintos índices del PIB. Sin embargo, a simple vista podemos determinar que existen países con PIB menor a otros pero que poseen un precio de la Big Mac mayor que el otro país en comparación, lo que significaría que nuestra hipótesis no se estaría cumpliendo. 
+
+
+Hagamos ahora el análisis de correlación.
+Para ello, ocuparemos los datos de los países en el año 2019 para simplificar la medición de la correlación entre las 2 variables. 
+
+```{r warning=FALSE}
+datos2019 <- DatosCombinados[DatosCombinados$date=="2019-01-01",]
+plot(datos2019$dollar_price~datos2019$gdp_md_est)
+cor.test(datos2019$dollar_price, datos2019$gdp_md_est)
+```
+
+Con el análisis de correlación, el valor de pearson nos entrega que no existe correlación entre ambas variables.
+
+```{r warning=FALSE}
+modelo1 <- lm(datos2019$dollar_price~datos2019$gdp_md_est)
+summary(modelo1)
+```
+
+
+Como en el F-statistic el valor de p-value es > 0.05, aceptamos la hipótesis nula diciendo que nuestro modelo no es válido.
+El R cuadrado es muy menor, por lo que la variabilidad de la variable "Precio de la big mac" no es explicada por el precio del Pib.
+```{r warning=FALSE}
+modelo1$coefficients
+plot(datos2019$dollar_price~datos2019$gdp_md_est)
+```
+
+Si bien descrubrimos que el modelo no es válido por el test de hipótesis anterior, addemás que aceptamos la hipótesis nula de que no existe varianza explicada del precio en dólares de la Big Mac con el respectivo PIB del país en el que se vende, de todas manera graficaremos los puntos y la línea acorde a la regresión. 
+
+```{r}
+modelo1$coefficients
+plot(datos2019$dollar_price~datos2019$gdp_md_est)+abline(modelo1, col = "red")
+```
+
+
+
+
+
+
+
+
+
